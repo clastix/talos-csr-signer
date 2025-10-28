@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: talos-csr-signer
+  namespace: default
+  labels:
+    app: talos-csr-signer
+  annotations:
+    # Share the same IP as control plane service
+    # Both services must use the same annotation value for IP sharing
+    metallb.io/allow-shared-ip: "shared-ip"
+    metallb.io/ip-allocated-from-pool: service-address-pool
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 10.10.10.101
+  ports:
+  - name: grpc
+    port: 50001
+    targetPort: 50001
+    protocol: TCP
+  selector:
+    app: talos-csr-signer
+  externalTrafficPolicy: Cluster

@@ -1,0 +1,67 @@
+version: v1alpha1
+debug: false
+persist: true
+
+machine:
+  type: worker
+  token: ask2bc.ur2wne77uxy26po9  # Machine token for trustd
+
+  # Talos Machine CA (from newly generated config)
+  ca:
+    crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJQekNCOHFBREFnRUNBaEVBdC9qWXV1aWxYYzV2UlF2U214U0dYakFGQmdNclpYQXdFREVPTUF3R0ExVUUKQ2hNRmRHRnNiM013SGhjTk1qVXhNREk0TVRVek1qVXlXaGNOTXpVeE1ESTJNVFV6TWpVeVdqQVFNUTR3REFZRApWUVFLRXdWMFlXeHZjekFxTUFVR0F5dGxjQU1oQUcvK2F4aTBOUmdQeFd0emt3R3pVYjd3RXQvcncxbFdnOC9iCit1U3ZXUDJpbzJFd1h6QU9CZ05WSFE4QkFmOEVCQU1DQW9Rd0hRWURWUjBsQkJZd0ZBWUlLd1lCQlFVSEF3RUcKQ0NzR0FRVUZCd01DTUE4R0ExVWRFd0VCL3dRRk1BTUJBZjh3SFFZRFZSME9CQllFRlA0NzNLMVZrNlZoeS9aQwpFT3dMSmVieUVjV3BNQVVHQXl0bGNBTkJBRDVXVVNibnFXUk4xV2RuUzdUdmtpb0J4a0lMQXpMaEN1aVVSaTRJCjNGRFlDOFdXdmkwaERCOHBsN3dZQ3g4d2wvSmE0aXBpR3pHL3ZJNk1Nd3lSdEFzPQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+    key: ""
+
+  kubelet:
+    image: ghcr.io/siderolabs/kubelet:v1.34.1
+    extraArgs:
+      rotate-certificates: "true"
+    extraConfig:
+      serverTLSBootstrap: true
+      nodeLeaseDurationSeconds: 40
+      nodeLeaseRenewIntervalSeconds: 10
+
+  network: {}
+
+  install:
+    disk: /dev/sda
+    image: ghcr.io/siderolabs/installer:v1.11.3
+    wipe: false
+    extraKernelArgs:
+      - console=ttyS0
+      - console=tty0
+
+  features:
+    rbac: true
+    kubePrism:
+      enabled: false  # Disable since using external control plane
+
+cluster:
+  id: AjE6hXaHT7msSOwbKfdwoD1bsPVA8TVtSycNhXTmYZA=
+  secret: 8aTJYAVYaoIyi5o6TVUtpnxoqlOwj+A2//nfu8yofIc=
+
+  controlPlane:
+    endpoint: https://10.10.10.101:6443  # Milano endpoint
+
+  clusterName: milano
+
+  network:
+    dnsDomain: cluster.local
+    podSubnets:
+      - 10.36.0.0/16
+    serviceSubnets:
+      - 10.96.0.0/12
+
+  token: u1auey.78f6fcj1pzoaur2i  # Kubernetes bootstrap token (Milano)
+
+  # Milano's actual Kubernetes CA certificate
+  ca:
+    crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJWitUTmVvRHRGZG93RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TlRBNU1Ua3dPVEkzTkRsYUZ3MHpOVEE1TVRjd09UTXlORGxhTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUUM0UU90NHJTSlhTU1l2dzBvSGZSaDJabU80UElrT2dDRUxLZGNKMEM5SDFET204QVpBUC80dTlwY2UKTSs0T1dLV29HS0tTaVA3UDJkY014QUVlN3BYV2xMN3M1WmZUT0FuTHZaeFpROHZDSE82VUN6M3N3MEhwS25vOApUb01pTFplNjI3UHBuaXFKUGpRM3J5THJmVnNJR3lsTGJzU2RPVTZnTnY4QnBmWmJXdkF1bHp5d3IwSmNlQytQCjI5QXcvQUM3M1YxUDFwRWFtcmRlTjdxd01UWC8vbVpYdGsvSHo5VXVaV1cxL2k1Tm5VejZhc0xJdEVMcVJVU3cKN0pTRG51VkJscXlmNyt5OVNWMllYZmx4VHZDU21NZGlNZXRxUjlhWVF4MVVTWUg3YjhibjRQQzFWZVdacWNvaQo1TCsvdkFCYnJNbUZ4TEhNL0MwYStYZ0FvMjNsQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJRanNMb0U5ZTF2T21hMlhpbi9PcXlHMm9pTU5UQVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQ1FKZHUxeFAzKwpYWGlNcDlrL1pGd2pxUG1OWEEyQmYyQVRqRGFudEhxOHdqZjUxUE0xY1NnaVdjWjI1ZDh5Y1ZoQ3p2LzkrWk9NCmFkSzVYV3oya0xUNzAvSGJNOUtsS0tKanM0SVU1L1lxaU9Lb0lheVdhWm5VTTNwbEN2MXViWWdvVjhoMmlHVzIKSFZzWFpJYmFvdW5JZzJxYTNaU0hEYzQ1REY0T1MwUWdzclZBMlduZ3pjSXNsMnNvUWNaRThLTERSSXZsc21LQQpDM0NINWtwZ2duSmJaOHhPaE1BUVBwSzZjakdsNEg0MTVuMEhGN0w4cEgzT2ViTkpsb2RrUEtteDQ3NHZBOC94CkZiaEl5TEkxb2QveUxsUU1ER0pqZndXYjRCNmxkaDlaWDNmVnFMV0I0NVd2OTRnd0JQMndzdTVJSmtTdmZrNjMKQWluNjg1aGJyc0FmCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    key: ""
+
+  discovery:
+    enabled: true  # Enable for trustd endpoint discovery
+    registries:
+      kubernetes:
+        disabled: true  # Disable Kubernetes-based discovery
+      service:
+        disabled: true  # Disable external service discovery

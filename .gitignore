@@ -1,0 +1,34 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+*.test
+*.out
+go.work
+
+# Generated protobuf code
+proto/*.pb.go
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+.CLAUDE.md
+
+# Secrets (local testing)
+*.key
+*.crt
+*.pem
+secrets/
