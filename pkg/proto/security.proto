@@ -1,0 +1,29 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// This file is derived from:
+// https://github.com/siderolabs/talos/blob/main/api/security/security.proto
+// Copyright (c) 2024 Sidero Labs, Inc.
+
+syntax = "proto3";
+
+package securityapi;
+
+option go_package = "github.com/clastix/talos-csr-signer/proto;securityapi";
+
+// SecurityService provides certificate signing for Talos workers
+service SecurityService {
+  rpc Certificate(CertificateRequest) returns (CertificateResponse);
+}
+
+// CertificateRequest contains a PEM-encoded CSR
+message CertificateRequest {
+  bytes csr = 1;
+}
+
+// CertificateResponse contains the CA cert and signed certificate
+message CertificateResponse {
+  bytes ca = 1;   // CA certificate in PEM format
+  bytes crt = 2;  // Signed certificate in PEM format
+}
