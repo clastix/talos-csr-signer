@@ -31,7 +31,6 @@ This service acts as `trustd`, implementing the Talos Security Service gRPC prot
 │ Control Plane IP: 10.10.10.101                     │
 │                                                    │
 │  Port 6443  → kube-apiserver (Kubernetes PKI)      │
-│  Port 8132  → konnectivity server                  │
 │  Port 50001 → talos-csr-signer (Talos Machine PKI) │
 │                                                    │
 └─────────────┬────────────────┬─────────────────────┘
@@ -40,22 +39,47 @@ This service acts as `trustd`, implementing the Talos Security Service gRPC prot
       │     Talos Worker              │
       │                               │
       │ kubelet     → Port 6443       │
-      │ konn. agent → Port 8132       │
       │ apid        → Port 50001      │
       └───────────────────────────────┘
 ```
 
 **How it works:**
-1. CSR signer shares LoadBalancer IP with control plane (different port)
+1. CSR signer shares IP with control plane (different port)
 2. Talos worker discovers CSR signer via Talos discovery protocol
 3. Worker sends certificate request to CSR signer (port 50001)
 4. CSR signer validates token and signs certificate with Machine CA
 5. Worker receives certificate, starts apid service
 6. `talosctl` can now manage the worker
 
+When a Talos worker needs a certificate:
+
+```
+Talos Worker                    CSR Signer (gRPC Server)
+    |                                    |
+    |  1. Generate CSR                   |
+    |                                    |
+    |  2. gRPC Call: Certificate()       |
+    |----------------------------------->|
+    |     CertificateRequest{            |
+    |       csr: <PEM bytes>             |
+    |     }                              |
+    |                                    |
+    |                        3. Validate token
+    |                        4. Sign CSR with CA
+    |                                    |
+    |  5. Return signed cert             |
+    |<-----------------------------------|
+    |     CertificateResponse{           |
+    |       ca: <CA cert>,               |
+    |       crt: <signed cert>           |
+    |     }                              |
+    |                                    |
+    |  6. Start apid service with cert   |
+```
+
 **For detailed architecture explanation:** See [docs/talos-kubeadm-integration.md](docs/talos-kubeadm-integration.md)
 
-**For complete step-by-step instructions:** See [docs/deployment-guide.md](docs/deployment-guide.md)
+**For technical comparison with Talos trustd:** See [docs/technical-comparison.md](docs/technical-comparison.md)
 
 ## Prerequisites
 
@@ -63,9 +87,11 @@ This service acts as `trustd`, implementing the Talos Security Service gRPC prot
 - MetalLB configured with IP sharing support
 - Docker for building images
 - kubectl with cluster access
-- Container registry access (docker.io/bsctl by default)
+- Container registry access
 
 ## Deployment
+
+See [docs/deployment-guide.md](docs/deployment-guide.md)
 
 ### Using Makefile
 
@@ -256,9 +282,36 @@ Contributions welcome! Please:
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see LICENSE file for details.
+### Main Project - Apache License 2.0
+
+The majority of this project is licensed under the **Apache License 2.0**. See the [LICENSE](LICENSE) file for full details.
+
+### Protocol Definition - Mozilla Public License 2.0
+
+The protocol buffer definition (`proto/security.proto`) is derived from the [Talos Linux project](https://github.com/siderolabs/talos) and is licensed under the **Mozilla Public License 2.0**. See the [LICENSE-MPL-2.0](LICENSE-MPL-2.0) file for full details.
+
+This file implements the Talos Security Service protocol specification to ensure compatibility with Talos worker nodes.
+
+### Attribution
+
+This project implements the Talos Security Service gRPC protocol as defined by:
+- **Talos Linux:** https://github.com/siderolabs/talos
+- **Protocol Definition Source:** https://github.com/siderolabs/talos/blob/main/api/security/security.proto
+- **Copyright:** Sidero Labs, Inc.
+
+We gratefully acknowledge the Talos Linux project and Sidero Labs for creating and maintaining the protocol specification that makes this integration possible.
 
 ## References
+
+### Documentation
+
+- **Deployment Guide:** [docs/deployment-guide.md](docs/deployment-guide.md)
+- **Architecture & Integration:** [docs/talos-kubeadm-integration.md](docs/talos-kubeadm-integration.md)
+- **Technical Comparison (Talos trustd vs CSR Signer):** [docs/technical-comparison.md](docs/technical-comparison.md)
+- **Security Analysis (Authentication & CA Storage):** [docs/security-analysis.md](docs/security-analysis.md)
+- **Talos Installation Guide:** [docs/talos-installation-guide.md](docs/talos-installation-guide.md)
+
+### External Resources
 
 - **Talos Documentation:** https://www.talos.dev
 - **Kubernetes TLS Bootstrapping:** https://kubernetes.io/docs/reference/access-authn-authz/bootstrap-tokens/
