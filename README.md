@@ -1,275 +1,246 @@
-# Talos CSR Signer Service
+# Talos CSR Signer
 
-A lightweight gRPC service that implements the Talos `trustd` Security Service protocol, enabling `talosctl` access for Talos worker nodes joining kubeadm-based or Kamaji control planes.
+A standalone gRPC service that implements the Talos Security Service protocol, enabling Talos worker nodes to obtain certificates and function with non-Talos control planes.
 
-## The Problem
+## Overview
 
-When Talos workers join kubeadm/Kamaji control planes:
-- ✅ **Kubernetes functionality works** - kubelet, pods, services, networking
-- ❌ **Talos API fails to start** - no `talosctl` access (logs, upgrades, console)
+Talos CSR Signer bridges the gap between traditional Kubernetes control planes (kubeadm, Kamaji, managed Kubernetes) and Talos Linux worker nodes. It provides the certificate signing functionality that Talos workers expect from a native Talos control plane.
 
-**Root Cause:** Talos workers need a `trustd` service to sign Talos API certificates. Kubeadm/Kamaji control planes don't provide this service.
+### The Problem
 
-## The Solution
+Talos Linux worker nodes require two separate PKI systems to function:
 
-This service acts as `trustd`, implementing the Talos Security Service gRPC protocol to sign certificate requests from workers.
+1. **Kubernetes PKI** - For kubelet to join the Kubernetes cluster (port 6443)
+2. **Talos Machine PKI** - For the Talos API (apid) to enable node management (port 50000/50001)
 
-**Result:** Full `talosctl` functionality while using kubeadm/Kamaji control planes.
+In hybrid deployments where the control plane is not running Talos Linux:
+- ✅ Kubernetes functionality works - kubelet joins successfully using standard bootstrap tokens
+- ❌ Talos API remains unavailable - workers cannot obtain Talos certificates
+- ❌ No `talosctl` access - cannot view logs, upgrade nodes, or access console
 
-## Features
+Talos workers expect a `trustd` service (part of Talos Linux) to sign Talos API certificates. Traditional control planes don't provide this service.
 
-- ✅ **Lightweight** - ~20MB container, distroless base image
-- ✅ **Standard Protocol** - Implements Talos SecurityService gRPC spec
-- ✅ **Secure** - Token authentication, TLS encryption, read-only filesystem
-- ✅ **Production-Ready** - High availability, resource limits, health checks
-- ✅ **Easy Deployment** - Simple Makefile commands, pre-built manifests
+### The Solution
 
-## Architecture
+This service implements the same gRPC protocol as Talos's native `trustd`, acting as a certificate authority for the Talos Machine PKI. It runs as a standard Kubernetes workload alongside your control plane, providing certificate signing services to Talos workers.
+
+**Result:** Talos Linux functionality on worker nodes while maintaining your existing control plane infrastructure.
+
+## How It Works
+
+### Dual PKI Architecture
+
+Talos worker nodes operate with two independent PKI systems:
 
 ```
 ┌────────────────────────────────────────────────────┐
-│ Control Plane IP: 10.10.10.101                     │
+│ Control Plane: 10.10.10.101                        │
 │                                                    │
-│  Port 6443  → kube-apiserver (Kubernetes PKI)      │
-│  Port 50001 → talos-csr-signer (Talos Machine PKI) │
+│  Port 6443  → kube-apiserver                       │
+│               Issues: Kubernetes certificates      │
+│               Used by: kubelet                     │
+│                                                    │
+│  Port 50001 → talos-csr-signer                     │
+│               Issues: Talos Machine certificates   │
+│               Used by: apid (Talos API)            │
 │                                                    │
 └─────────────┬────────────────┬─────────────────────┘
+              │                │
               │                │
       ┌───────▼────────────────▼──────┐
       │     Talos Worker              │
       │                               │
-      │ kubelet     → Port 6443       │
-      │ apid        → Port 50001      │
+      │ kubelet → 6443 (K8s certs)    │
+      │ apid    → 50001 (Talos certs) │
       └───────────────────────────────┘
 ```
 
-**How it works:**
-1. CSR signer shares IP with control plane (different port)
-2. Talos worker discovers CSR signer via Talos discovery protocol
-3. Worker sends certificate request to CSR signer (port 50001)
-4. CSR signer validates token and signs certificate with Machine CA
-5. Worker receives certificate, starts apid service
-6. `talosctl` can now manage the worker
+### Certificate Signing Flow
 
-When a Talos worker needs a certificate:
+When a Talos worker starts, it requests certificates for its API service (apid):
 
 ```
-Talos Worker                    CSR Signer (gRPC Server)
-    |                                    |
-    |  1. Generate CSR                   |
-    |                                    |
-    |  2. gRPC Call: Certificate()       |
-    |----------------------------------->|
-    |     CertificateRequest{            |
-    |       csr: <PEM bytes>             |
-    |     }                              |
-    |                                    |
-    |                        3. Validate token
-    |                        4. Sign CSR with CA
-    |                                    |
-    |  5. Return signed cert             |
-    |<-----------------------------------|
-    |     CertificateResponse{           |
-    |       ca: <CA cert>,               |
-    |       crt: <signed cert>           |
-    |     }                              |
-    |                                    |
-    |  6. Start apid service with cert   |
+Talos Worker                 Talos CSR Signer
+|                                 |
+|  1. Generate CSR                |
+|     (subject, IPs, DNS)         |
+|                                 |
+|  2. gRPC: Certificate()         |
+|     + metadata: token           |
+|────────────────────────────────>|
+|                                 |
+|              3. Validate token  |
+|              4. Sign with CA    |
+|                                 |
+|  5. CertificateResponse         |
+|     ca: <CA cert>               |
+|     crt: <signed cert>          |
+|<────────────────────────────────|
+|                                 |
+|  6. Start apid with cert        |
+|                                 |
 ```
 
-**For detailed architecture explanation:** See [docs/talos-kubeadm-integration.md](docs/talos-kubeadm-integration.md)
+### Discovery and Connection
 
-**For technical comparison with Talos trustd:** See [docs/technical-comparison.md](docs/technical-comparison.md)
+Workers locate the CSR Signer using the same discovery mechanism as native Talos clusters:
 
-## Prerequisites
+1. **Control Plane Endpoint**: Workers are configured with the control plane IP (e.g., `https://10.10.10.101:6443`)
+2. **Port Translation**: Workers contact port 50001 on the same IP for certificate signing
+3. **Automatic Failover**: In HA deployments, LoadBalancer routes requests to healthy CSR Signer pods
 
-- Kubernetes cluster with kubeadm or Kamaji control plane
-- MetalLB configured with IP sharing support
-- Docker for building images
-- kubectl with cluster access
-- Container registry access
+### Security Model
 
-## Deployment
+The CSR Signer uses the same authentication model as Talos's native `trustd`:
 
-See [docs/deployment-guide.md](docs/deployment-guide.md)
+- **Shared Secret**: Single machine token for all workers in the cluster
+- **Token Authentication**: Requests validated via gRPC metadata
+- **TLS Encryption**: All communication encrypted in transit
+- **CA Private Key**: Stored in Kubernetes Secret, mounted read-only
 
-### Using Makefile
+This is not a limitation but an intentional design inherited from Talos Linux.
 
-```bash
-# Complete installation workflow
-make install          # Build + push + deploy
+## Deployment Models
 
-# Individual steps
-make build            # Build Go binary
-make docker-build     # Build Docker image
-make docker-push      # Push to registry
-make deploy           # Deploy to Kubernetes
+### Sidecar Deployment (Kamaji)
 
-# Management
-make status           # Show deployment status
-make logs             # View logs
-make restart          # Restart pods
-make undeploy         # Remove deployment
+Run CSR Signer as a sidecar container in Kamaji TenantControlPlane, sharing the same LoadBalancer IP on port 50001:
+
+```yaml
+apiVersion: kamaji.clastix.io/v1alpha1
+kind: TenantControlPlane
+spec:
+  controlPlane:
+    deployment:
+      additionalContainers:
+        - name: talos-csr-signer
+          image: docker.io/bsctl/talos-csr-signer:latest
+          ports:
+            - containerPort: 50001
 ```
 
-### Manual Deployment
+**Use when:**
 
-```bash
-# Apply Kubernetes manifests
-kubectl apply -f deploy/01-secret.yaml      # Create secret first
-kubectl apply -f deploy/02-deployment.yaml  # Deploy CSR signer
-kubectl apply -f deploy/03-service.yaml     # Expose via LoadBalancer
+- Running Kamaji for multi-tenant Kubernetes
+- Each tenant needs isolated Talos worker support
+- Control planes are dynamically provisioned
+
+See [docs/sidecar-deployment.md](docs/sidecar-deployment.md) for complete guide.
+
+### Standalone Deployment (kubeadm)
+
+Run CSR Signer as a DaemonSet on control plane nodes, exposed via HostPort 50001:
+
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+spec:
+  template:
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      containers:
+      - name: talos-csr-signer
+        ports:
+        - containerPort: 50001
+          hostPort: 50001
 ```
+
+**Use when:**
+
+- Existing kubeadm control plane with VIP (keepalived, kube-vip)
+- Want to add Talos workers to existing clusters
+- Incremental migration to Talos
+
+See [docs/standalone-deployment.md](docs/standalone-deployment.md) for complete guide.
+
+## Use Cases
+
+### When to Use CSR Signer
+
+**Multi-Tenant Kubernetes:**
+- Kamaji provides virtualized control planes
+- Each tenant gets isolated Talos worker support
+- Separate Machine PKI per tenant
+
+**Cost Optimization:**
+- Control plane: Managed Kubernetes (convenience, support)
+- Workers: Self-managed Talos (cost-effective, secure)
+
+### When NOT to Use CSR Signer
+
+If you're deploying a pure Talos Linux, use the native `trustd` service that comes with Talos.
+
+
+## Key Features
+
+- **Protocol Compatible**: Wire-compatible with Talos `trustd` using SecurityService gRPC spec
+- **Lightweight**: ~20MB distroless container image
+- **High Availability**: Supports multiple replicas behind LoadBalancer
+- **Secure**: Non-root, read-only filesystem, minimal capabilities
+- **Kubernetes Native**: Deploy with kubectl, monitor with standard tools
+- **Simple Operations**: Standard Kubernetes deployment patterns
 
 ## Configuration
 
-### Environment Variables
-
-Configure in `deploy/02-deployment.yaml`:
+The service is configured through environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `50001` | gRPC server port |
-| `CA_CERT_PATH` | `/etc/talos-ca/ca.crt` | Machine CA certificate path |
-| `CA_KEY_PATH` | `/etc/talos-ca/ca.key` | Machine CA private key path |
+| `CA_CERT_PATH` | `/etc/talos-ca/ca.crt` | Talos Machine CA certificate path |
+| `CA_KEY_PATH` | `/etc/talos-ca/ca.key` | Talos Machine CA private key path |
 | `TALOS_TOKEN` | *(required)* | Machine token for authentication |
-| `SERVER_IPS` | *(optional)* | LoadBalancer IPs for TLS certificate SANs |
+| `SERVER_IPS` | *(optional)* | Comma-separated IPs for TLS certificate SANs |
 
-### Resource Requirements
-
-```yaml
-resources:
-  requests:
-    cpu: 100m
-    memory: 64Mi
-  limits:
-    cpu: 200m
-    memory: 128Mi
-```
-
-**Typical usage:** ~50MB RAM, <50m CPU per replica
-
-### High Availability
-
-Increase replicas for production:
-
-```yaml
-# deploy/02-deployment.yaml
-spec:
-  replicas: 2  # Or more
-```
-
-All replicas share the same LoadBalancer IP via MetalLB.
-
-## Security
-
-### CA Private Key Protection
-- Stored in Kubernetes Secret with restricted permissions
-- Mounted read-only in pods
-- Consider enabling Kubernetes secret encryption at rest
-- Rotate CA periodically (requires updating all workers)
-
-### Token Authentication
-- Same token used by all workers (shared secret model)
-- Passed via gRPC metadata (not HTTP headers)
-- Rotate when adding/removing workers or on suspected compromise
-
-### Network Security
-- Only authenticated requests accepted (token validation)
-- Consider NetworkPolicy to restrict CSR signer access
-- TLS encryption for all gRPC communication
-
-### Container Security
-- Runs as non-root user (UID 65532)
-- Read-only root filesystem
-- All capabilities dropped
-- Distroless base image (`gcr.io/distroless/static-debian12`)
+CA certificate, private key, and token are mounted from a Kubernetes Secret.
 
 ## Development
 
-### Build Locally
+The `Makefile` provides targets for building and testing.
+
+Build and test workflow:
 
 ```bash
-# Install dependencies
-make deps
-
-# Generate protobuf code
-make proto
+# Install dependencies and generate protobuf code
+make deps && make proto
 
 # Build binary
 make build
 
-# Run locally (requires CA files)
-CA_CERT_PATH=./ca.crt \
-CA_KEY_PATH=./ca.key \
-TALOS_TOKEN=your-token \
-./bin/talos-csr-signer
-```
+# Run tests
+make test
+make lint
 
-### Test with Docker
-
-```bash
-# Build image
+# Build and push Docker image (for custom registries)
 make docker-build
-
-# Run container locally
-docker run --rm \
-  -v $(pwd)/ca.crt:/etc/talos-ca/ca.crt:ro \
-  -v $(pwd)/ca.key:/etc/talos-ca/ca.key:ro \
-  -e TALOS_TOKEN=test-token \
-  -p 50001:50001 \
-  docker.io/bsctl/talos-csr-signer:latest
+make docker-push IMAGE_REGISTRY=your-registry.com IMAGE_REPO=your-repo
 ```
 
-### Run Tests
+Available Makefile targets:
 
 ```bash
-make test              # Run unit tests
-make lint              # Run golangci-lint
-make verify-deployment # Verify deployment health
+make help         # Show all available targets
+
+# Development
+make proto        # Generate protobuf code
+make deps         # Download Go module dependencies
+make build        # Build binary locally
+make test         # Run unit tests
+make lint         # Run golangci-lint
+
+# Docker
+make docker-build # Build Docker image
+make docker-push  # Build and push to registry
+make docker-run   # Run container locally (testing)
+
+# Utilities
+make clean        # Clean generated files
+make version      # Show version information
+make env          # Show environment variables
 ```
 
-## Makefile Commands
-
-```bash
-# Building
-make build              # Build Go binary locally
-make docker-build       # Build Docker image
-make docker-push        # Build and push to registry
-
-# Deployment
-make deploy             # Build, push, and deploy to Kubernetes
-make deploy-local       # Deploy without pushing (for local testing)
-make undeploy           # Remove deployment from Kubernetes
-make restart            # Restart pods (e.g., after updating secret)
-
-# Monitoring
-make status             # Show deployment status
-make logs               # Show recent logs
-make logs-follow        # Follow logs in real-time
-make describe           # Describe deployment and pods
-
-# Testing
-make verify-deployment  # Verify deployment is healthy
-make test              # Run unit tests
-make lint              # Run linter
-
-# Complete workflows
-make install           # Build + push + deploy
-make reinstall         # Undeploy + install
-make release           # Clean + build + push
-```
-
-## Troubleshooting
-
-Common issues and solutions:
-
-- **Pod not starting:** Check secret exists and contains valid CA materials
-- **LoadBalancer IP pending:** Verify MetalLB is installed and IP sharing annotation matches
-- **Worker apid not starting:** Ensure `discovery.enabled: true` in worker config
-- **Certificate signing fails:** Verify token in worker config matches secret
-
-**For detailed troubleshooting:** See [docs/deployment-guide.md#troubleshooting](docs/deployment-guide.md#troubleshooting)
+For deployment instructions, see the deployment guides in [docs/](docs/).
 
 ## Contributing
 
@@ -282,38 +253,38 @@ Contributions welcome! Please:
 
 ## License
 
-### Main Project - Apache License 2.0
+### Apache License 2.0
 
 The majority of this project is licensed under the **Apache License 2.0**. See the [LICENSE](LICENSE) file for full details.
 
-### Protocol Definition - Mozilla Public License 2.0
+### Protocol Buffer Definition - Mozilla Public License 2.0
 
-The protocol buffer definition (`proto/security.proto`) is derived from the [Talos Linux project](https://github.com/siderolabs/talos) and is licensed under the **Mozilla Public License 2.0**. See the [LICENSE-MPL-2.0](LICENSE-MPL-2.0) file for full details.
+The protocol buffer definition (`proto/security.proto`) is derived from the [Talos Linux project](https://github.com/siderolabs/talos) and is licensed under the **Mozilla Public License 2.0**. See the [LICENSE-MPL-2.0](https://www.mozilla.org/en-US/MPL/2.0/) file for full details.
 
-This file implements the Talos Security Service protocol specification to ensure compatibility with Talos worker nodes.
+This file implements the Talos gRPC protocol specification to ensure compatibility with Talos worker nodes.
 
 ### Attribution
 
-This project implements the Talos Security Service gRPC protocol as defined by:
+This project implements the Talos gRPC protocol as defined by:
+
 - **Talos Linux:** https://github.com/siderolabs/talos
 - **Protocol Definition Source:** https://github.com/siderolabs/talos/blob/main/api/security/security.proto
 - **Copyright:** Sidero Labs, Inc.
 
 We gratefully acknowledge the Talos Linux project and Sidero Labs for creating and maintaining the protocol specification that makes this integration possible.
 
-## References
+## Documentation
 
-### Documentation
+### Deployment Guides
 
-- **Deployment Guide:** [docs/deployment-guide.md](docs/deployment-guide.md)
-- **Architecture & Integration:** [docs/talos-kubeadm-integration.md](docs/talos-kubeadm-integration.md)
-- **Technical Comparison (Talos trustd vs CSR Signer):** [docs/technical-comparison.md](docs/technical-comparison.md)
-- **Security Analysis (Authentication & CA Storage):** [docs/security-analysis.md](docs/security-analysis.md)
-- **Talos Installation Guide:** [docs/talos-installation-guide.md](docs/talos-installation-guide.md)
+Implementation details and step-by-step instructions:
+
+- **[Sidecar Deployment (Kamaji)](docs/sidecar-deployment.md)** - Deploy as Kamaji TenantControlPlane sidecar
+- **[Standalone Deployment (kubeadm)](docs/standalone-deployment.md)** - Deploy on kubeadm control planes with VIP
 
 ### External Resources
 
-- **Talos Documentation:** https://www.talos.dev
+- **Talos Linux:** https://www.talos.dev
+- **Kamaji:** https://kamaji.clastix.io
 - **Kubernetes TLS Bootstrapping:** https://kubernetes.io/docs/reference/access-authn-authz/bootstrap-tokens/
-- **Kamaji Documentation:** https://kamaji.clastix.io/
 

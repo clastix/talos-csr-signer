@@ -5,8 +5,8 @@ set -e
 # This script creates a Talos worker VM on Proxmox
 
 # Configuration
-VMID=123
-VM_NAME="talos-worker-03"
+VMID=121
+VM_NAME="talos-worker-01"
 STORAGE="local"
 BRIDGE="vnet1"
 IMAGE="/var/lib/vz/template/iso/talos-v1.11.3-nocloud-amd64.raw"
