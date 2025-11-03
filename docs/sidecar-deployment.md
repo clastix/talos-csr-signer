@@ -56,9 +56,22 @@ kubectl create secret generic ${CLUSTER_NAME}-talos-ca -n $NAMESPACE \
   --from-literal=token="$TALOS_TOKEN"
 ```
 
-## Step 4: Deploy Control Plane
+## Step 4: Generate the TLS Certificate with cert-manager
 
-Deploy TenantControlPlane with CSR Signer sidecar:
+The gRPC Server is server by a TLS Certificate generate by cert-manager, a dependency already required by Kamaji.
+
+To get the certificate required by the server, deploy the following files:
+
+- `deploy/00-secret.yaml`
+- `deploy/01-issuer.yaml`
+- `deploy/01-certificate.yaml`
+
+> The said files still require some customisations regarding the Cluster name, and exposed IPs (`$WORKER_IPS`):
+> this information vary according to your needs.
+
+## Step 5: Deploy Control Plane
+
+Deploy TenantControlPlane with the CSR Signer sidecar:
 
 ```bash
 kubectl apply -f - <<EOF
@@ -74,33 +87,25 @@ spec:
       replicas: 1
       additionalContainers:
         - name: talos-csr-signer
-          image: docker.io/bsctl/talos-csr-signer:latest
+          image: ghcr.io/clastix/talos-csr-signer:latest
           ports:
             - name: grpc
               containerPort: 50001
               protocol: TCP
-          env:
-            - name: PORT
-              value: "50001"
-            - name: CA_CERT_PATH
-              value: /etc/talos-ca/ca.crt
-            - name: CA_KEY_PATH
-              value: /etc/talos-ca/ca.key
-            - name: TALOS_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: ${CLUSTER_NAME}-talos-ca
-                  key: token
-            - name: SERVER_IPS
-              value: "$CONTROL_PLANE_IP"
           volumeMounts:
             - name: talos-ca
               mountPath: /etc/talos-ca
+              readOnly: true
+            - name: tls-cert
+              mountPath: /etc/talos-server-crt
               readOnly: true
       additionalVolumes:
         - name: talos-ca
           secret:
             secretName: ${CLUSTER_NAME}-talos-ca
+        - name: tls-cert
+          secret:
+            secretName: ${CLUSTER_NAME}-talos-tls-cert
     service:
       serviceType: LoadBalancer
       additionalMetadata:
@@ -130,7 +135,7 @@ kubectl logs -n $NAMESPACE -l kamaji.clastix.io/name=$CLUSTER_NAME -c talos-csr-
 
 ## Step 5: Configure Workers
 
-Generate talosconfig for worker management:
+Generate the `talosconfig` for worker management:
 
 ```bash
 talosctl gen config $CLUSTER_NAME https://$CONTROL_PLANE_IP:6443 \
@@ -306,13 +311,14 @@ Tokens must match exactly.
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `50001` | gRPC server port |
-| `CA_CERT_PATH` | `/etc/talos-ca/ca.crt` | Talos Machine CA certificate path |
-| `CA_KEY_PATH` | `/etc/talos-ca/ca.key` | Talos Machine CA private key path |
-| `TALOS_TOKEN` | required | Machine token for authentication |
-| `SERVER_IPS` | optional | Comma-separated IPs for TLS certificate SANs |
+| Variable        | Default | Description                       |
+|-----------------|---------|-----------------------------------|
+| `PORT`          | `50001` | gRPC server port                  |
+| `CA_CERT_PATH`  | `/etc/talos-ca/ca.crt` | Talos Machine CA certificate path |
+| `CA_KEY_PATH`   | `/etc/talos-ca/ca.key` | Talos Machine CA private key path |
+| `TLS_CERT_PATH` | `/etc/talos-ca/ca.crt` | CSR gRPC server certificate path  |
+| `TLS_KEY_PATH`  | `/etc/talos-ca/ca.key` | CSR gRPC server private key path |
+| `TALOS_TOKEN`   | required | Machine token for authentication  |
 
 ---
 

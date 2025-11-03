@@ -1,0 +1,16 @@
+version: "2"
+linters:
+  default: all
+  disable:
+    - cyclop
+    - depguard
+    - exhaustruct
+    - funlen
+    - lll
+    - mnd
+    - varnamelen
+  settings:
+    goheader:
+      template: |-
+        Copyright 2025 Clastix Labs
+        SPDX-License-Identifier: Apache-2.0

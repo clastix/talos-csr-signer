@@ -287,4 +287,3 @@ Implementation details and step-by-step instructions:
 - **Talos Linux:** https://www.talos.dev
 - **Kamaji:** https://kamaji.clastix.io
 - **Kubernetes TLS Bootstrapping:** https://kubernetes.io/docs/reference/access-authn-authz/bootstrap-tokens/
-

@@ -1,0 +1,29 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ${CLUSTER_NAME}-talos-tls-cert
+  namespace: default
+spec:
+  secretName: ${CLUSTER_NAME}-talos-tls-cert
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days before
+  isCA: false
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+  ipAddresses:
+    - 127.0.0.1
+    # Add your custom IPs
+  dnsNames:
+    - talos-csr-signer
+    - talos-csr-signer.default
+    - talos-csr-signer.default.svc
+    - talos-csr-signer.default.svc.cluster.local
+  issuerRef:
+    name: ${CLUSTER_NAME}-talos-ca  # 01-issuer.yaml
+    kind: Issuer
+    group: cert-manager.io

@@ -90,35 +90,27 @@ spec:
         effect: NoSchedule
       containers:
       - name: talos-csr-signer
-        image: docker.io/bsctl/talos-csr-signer:latest
+        image: ghcr.io/clastix/talos-csr-signer:latest
         imagePullPolicy: Always
         ports:
         - name: grpc
           containerPort: 50001
           protocol: TCP
           hostPort: 50001
-        env:
-        - name: PORT
-          value: "50001"
-        - name: CA_CERT_PATH
-          value: /etc/talos-ca/ca.crt
-        - name: CA_KEY_PATH
-          value: /etc/talos-ca/ca.key
-        - name: TALOS_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: ${CLUSTER_NAME}-talos-ca
-              key: token
-        - name: SERVER_IPS
-          value: "$CONTROL_PLANE_IP"
         volumeMounts:
         - name: talos-ca
           mountPath: /etc/talos-ca
+          readOnly: true
+        - name: tls-cert
+          mountPath: /etc/talos-server-crt
           readOnly: true
       volumes:
       - name: talos-ca
         secret:
           secretName: ${CLUSTER_NAME}-talos-ca
+      - name: tls-cert
+        secret:
+          secretName: ${CLUSTER_NAME}-talos-tls-cert
 EOF
 
 kubectl apply -f talos-csr-signer-daemonset.yaml

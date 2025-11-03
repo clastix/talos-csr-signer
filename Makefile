@@ -1,4 +1,4 @@
-# Talos CSR Signer - Makefile
+# Kamaji addon for Talos worker nodes - Makefile
 # Build, test, and container image automation
 #
 # NOTE: This Makefile is for development and building container images.
@@ -6,113 +6,128 @@
 #       - docs/sidecar-deployment.md (Kamaji)
 #       - docs/standalone-deployment.md (kubeadm)
 
-# Configuration
-IMAGE_REGISTRY ?= docker.io
-IMAGE_REPO ?= bsctl/talos-csr-signer
-IMAGE_TAG ?= latest
-IMAGE_NAME = $(IMAGE_REGISTRY)/$(IMAGE_REPO):$(IMAGE_TAG)
+GIT_HEAD_COMMIT ?= $$(git rev-parse --short HEAD)
+VERSION ?= $(or $(shell git describe --abbrev=0 --tags 2>/dev/null),$(GIT_HEAD_COMMIT))
 
-# Go parameters
-GOCMD = go
-GOBUILD = $(GOCMD) build
-GOCLEAN = $(GOCMD) clean
-GOTEST = $(GOCMD) test
-GOGET = $(GOCMD) get
-GOMOD = $(GOCMD) mod
+# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
+ifeq (,$(shell go env GOBIN))
+GOBIN=$(shell go env GOPATH)/bin
+else
+GOBIN=$(shell go env GOBIN)
+endif
+
+# Setting SHELL to bash allows bash commands to be executed by recipes.
+# Options are set to exit when a recipe line exits non-zero or a piped command fails.
+SHELL = /usr/bin/env bash -o pipefail
+.SHELLFLAGS = -ec
+
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
+## Tool Binaries
+GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
+KO ?= $(LOCALBIN)/ko
+PROTOC ?= $(LOCALBIN)/protoc
+PROTOC_GO ?= $(LOCALBIN)/protoc-gen-go-grpc
+
+# OCI variables
+OCI_REGISTRY ?= ghcr.io
+OCI_REPO ?= clastix/talos-csr-signer
+OCI_TAG ?= latest
+OCI_NAME = $(OCI_REGISTRY)/$(OCI_REPO):$(OCI_TAG)
 
 # Binary name
 BINARY_NAME = talos-csr-signer
 BINARY_PATH = bin/$(BINARY_NAME)
 
 # Protobuf
-PROTO_DIR = proto
+PROTO_DIR = pkg/proto
 PROTO_FILES = $(PROTO_DIR)/security.proto
 PROTO_GEN = $(PROTO_DIR)/security.pb.go $(PROTO_DIR)/security_grpc.pb.go
-
-# Colors for output
-COLOR_RESET = \033[0m
-COLOR_BOLD = \033[1m
-COLOR_GREEN = \033[32m
-COLOR_YELLOW = \033[33m
-COLOR_BLUE = \033[34m
-
-.PHONY: all proto build docker-build docker-push docker-run clean help test lint deps
+PROTOC_VERSION := 28.2
+PROTOC_GO_VERSION := 1.5.1
 
 # Default target - show help
 .DEFAULT_GOAL := help
 
-all: proto build docker-build ## Build all components (proto + binary + docker image)
+all: build
+
+##@ Binary
+
+.PHONY: ko
+ko: $(KO) ## Download ko locally if necessary.
+$(KO): $(LOCALBIN)
+	test -s $(LOCALBIN)/ko || GOBIN=$(LOCALBIN) CGO_ENABLED=0 go install -ldflags="-s -w" github.com/google/ko@v0.18.0
+
+.PHONY: protoc_go
+protoc_go: $(PROTOC_GO) ## Download protoc-gen-go-grpc locally if necessary.
+$(PROTOC_GO): $(LOCALBIN)
+	test -s $(LOCALBIN)/protoc-gen-go-grpc || GOBIN=$(LOCALBIN) CGO_ENABLED=0 go install -ldflags="-s -w" google.golang.org/grpc/cmd/protoc-gen-go-grpc@v$(PROTOC_GO_VERSION)
+
+.PHONY: protoc
+protoc: $(PROTOC) ## Download protoc locally if necessary.
+$(PROTOC): $(LOCALBIN)
+	test -s $(PROTOC) || (rm -f $(PROTOC) && \
+	curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v$(PROTOC_VERSION)/protoc-$(PROTOC_VERSION)-linux-x86_64.zip && \
+	unzip -j protoc-*.zip bin/protoc -d bin && \
+	rm protoc-*.zip)
+
+.PHONY: golangci-lint
+golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
+$(GOLANGCI_LINT): $(LOCALBIN)
+	test -s $(LOCALBIN)/golangci-lint || GOBIN=$(LOCALBIN) CGO_ENABLED=0 go install -ldflags="-s -w" github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.0.2
 
 ##@ General
 
 help: ## Display this help message
-	@echo "$(COLOR_BOLD)Talos CSR Signer - Available Targets$(COLOR_RESET)"
+	@echo "Kamaji Talos Addon - Available Targets"
 	@echo ""
-	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make $(COLOR_BLUE)<target>$(COLOR_RESET)\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  $(COLOR_BLUE)%-20s$(COLOR_RESET) %s\n", $$1, $$2 } /^##@/ { printf "\n$(COLOR_BOLD)%s$(COLOR_RESET)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make $(COLOR_BLUE)<target>\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  $(COLOR_BLUE)%-20s %s\n", $$1, $$2 } /^##@/ { printf "\n%s\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
 
-proto: ## Generate protobuf code
-	@echo "$(COLOR_GREEN)Generating protobuf code...$(COLOR_RESET)"
-	@protoc --go_out=. --go_opt=paths=source_relative \
+proto: protoc protoc_go ## Generate protobuf code
+	PATH=$$PATH:$(LOCALBIN) $(PROTOC) --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		$(PROTO_FILES)
-	@echo "$(COLOR_GREEN)✓ Protobuf code generated$(COLOR_RESET)"
 
 deps: ## Download Go module dependencies
-	@echo "$(COLOR_GREEN)Downloading dependencies...$(COLOR_RESET)"
-	@$(GOMOD) download
-	@$(GOMOD) tidy
-	@echo "$(COLOR_GREEN)✓ Dependencies downloaded$(COLOR_RESET)"
+	go mod download
+	go mod tidy
 
-build: proto ## Build the binary locally
-	@echo "$(COLOR_GREEN)Building binary...$(COLOR_RESET)"
-	@mkdir -p bin
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="-w -s" -o $(BINARY_PATH) ./cmd
-	@echo "$(COLOR_GREEN)✓ Binary built: $(BINARY_PATH)$(COLOR_RESET)"
+build: pkg/proto ## Build the binary locally
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o $(BINARY_PATH) .
 
 test: ## Run unit tests
-	@echo "$(COLOR_GREEN)Running tests...$(COLOR_RESET)"
-	@$(GOTEST) -v -race -coverprofile=coverage.out ./...
-	@echo "$(COLOR_GREEN)✓ Tests passed$(COLOR_RESET)"
+	go test -v -race -coverprofile=coverage.out ./...
 
-lint: ## Run golangci-lint (requires golangci-lint installed)
-	@echo "$(COLOR_GREEN)Running linter...$(COLOR_RESET)"
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./...; \
-		echo "$(COLOR_GREEN)✓ Lint passed$(COLOR_RESET)"; \
-	else \
-		echo "$(COLOR_YELLOW)⚠ golangci-lint not installed, skipping$(COLOR_RESET)"; \
-	fi
+lint: golangci-lint ## Run golangci-lint (requires golangci-lint installed)
+	$(GOLANGCI_LINT) run -c=.golangci.yaml ./...
 
 clean: ## Clean generated files and binaries
-	@echo "$(COLOR_GREEN)Cleaning...$(COLOR_RESET)"
 	@rm -f $(PROTO_GEN)
 	@rm -rf bin/
 	@rm -f coverage.out
-	@$(GOCLEAN)
-	@echo "$(COLOR_GREEN)✓ Cleaned$(COLOR_RESET)"
+	@go clean
 
-##@ Docker
+##@ OCI
 
-docker-build: ## Build Docker image
-	@echo "$(COLOR_GREEN)Building Docker image: $(IMAGE_NAME)$(COLOR_RESET)"
-	@docker build -t $(IMAGE_NAME) .
-	@echo "$(COLOR_GREEN)✓ Docker image built$(COLOR_RESET)"
+KO_LOCAL ?= true
+KO_PUSH ?= false
 
-docker-push: docker-build ## Build and push Docker image to registry
-	@echo "$(COLOR_GREEN)Pushing Docker image: $(IMAGE_NAME)$(COLOR_RESET)"
-	@docker push $(IMAGE_NAME)
-	@echo "$(COLOR_GREEN)✓ Docker image pushed$(COLOR_RESET)"
+oci-build: $(KO)  ## Build OCI artefact
+	KOCACHE=/tmp/ko-cache KO_DOCKER_REPO=${OCI_REGISTRY}/${OCI_REPO} \
+	$(KO) build . --bare --tags=$(VERSION) --local=$(KO_LOCAL) --push=$(KO_PUSH)
 
-docker-run: docker-build ## Run Docker container locally (for testing)
-	@echo "$(COLOR_GREEN)Running Docker container...$(COLOR_RESET)"
+oci-run: oci-build ## Run OCI container locally (for testing)
 	@docker run --rm -it \
 		-p 50001:50001 \
 		-e CA_CERT_PATH=/tmp/ca.crt \
 		-e CA_KEY_PATH=/tmp/ca.key \
 		-e TALOS_TOKEN=test-token \
-		$(IMAGE_NAME)
+		$(OCI_NAME)
 
 ##@ Information
 
