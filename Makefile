@@ -30,7 +30,8 @@ $(LOCALBIN):
 GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
 KO ?= $(LOCALBIN)/ko
 PROTOC ?= $(LOCALBIN)/protoc
-PROTOC_GO ?= $(LOCALBIN)/protoc-gen-go-grpc
+PROTOC_GEN_GO ?= $(LOCALBIN)/protoc-gen-go
+PROTOC_GEN_GO_GRCP ?= $(LOCALBIN)/protoc-gen-go-grpc
 
 # OCI variables
 OCI_REGISTRY ?= ghcr.io
@@ -47,7 +48,8 @@ PROTO_DIR = pkg/proto
 PROTO_FILES = $(PROTO_DIR)/security.proto
 PROTO_GEN = $(PROTO_DIR)/security.pb.go $(PROTO_DIR)/security_grpc.pb.go
 PROTOC_VERSION := 28.2
-PROTOC_GO_VERSION := 1.5.1
+PROTOC_GEN_GO_VERSION := 1.27.1
+PROTOC_GEN_GO_GRCP_VERSION := 1.5.1
 
 # Default target - show help
 .DEFAULT_GOAL := help
@@ -61,10 +63,15 @@ ko: $(KO) ## Download ko locally if necessary.
 $(KO): $(LOCALBIN)
 	test -s $(LOCALBIN)/ko || GOBIN=$(LOCALBIN) CGO_ENABLED=0 go install -ldflags="-s -w" github.com/google/ko@v0.18.0
 
-.PHONY: protoc_go
-protoc_go: $(PROTOC_GO) ## Download protoc-gen-go-grpc locally if necessary.
-$(PROTOC_GO): $(LOCALBIN)
-	test -s $(LOCALBIN)/protoc-gen-go-grpc || GOBIN=$(LOCALBIN) CGO_ENABLED=0 go install -ldflags="-s -w" google.golang.org/grpc/cmd/protoc-gen-go-grpc@v$(PROTOC_GO_VERSION)
+.PHONY: protoc_gen_go_grpc
+protoc_gen_go_grpc: $(PROTOC_GEN_GO_GRCP) ## Download protoc-gen-go-grpc locally if necessary.
+$(PROTOC_GEN_GO_GRCP): $(LOCALBIN)
+	test -s $(LOCALBIN)/protoc-gen-go-grpc || GOBIN=$(LOCALBIN) CGO_ENABLED=0 go install -ldflags="-s -w" google.golang.org/grpc/cmd/protoc-gen-go-grpc@v$(PROTOC_GEN_GO_GRCP_VERSION)
+
+.PHONY: protoc_gen_go
+protoc_gen_go: $(PROTOC_GEN_GO) ## Download protoc-gen-go locally if necessary.
+$(PROTOC_GEN_GO): $(LOCALBIN)
+	test -s $(LOCALBIN)/protoc-gen-go || GOBIN=$(LOCALBIN) CGO_ENABLED=0 go install -ldflags="-s -w" google.golang.org/protobuf/cmd/protoc-gen-go@v$(PROTOC_GEN_GO_VERSION)
 
 .PHONY: protoc
 protoc: $(PROTOC) ## Download protoc locally if necessary.
@@ -88,7 +95,7 @@ help: ## Display this help message
 
 ##@ Development
 
-proto: protoc protoc_go ## Generate protobuf code
+proto: protoc protoc_gen_go protoc_gen_go_grpc ## Generate protobuf code
 	PATH=$$PATH:$(LOCALBIN) $(PROTOC) --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		$(PROTO_FILES)
@@ -119,7 +126,7 @@ KO_PUSH ?= false
 
 oci-build: $(KO)  ## Build OCI artefact
 	KOCACHE=/tmp/ko-cache KO_DOCKER_REPO=${OCI_REGISTRY}/${OCI_REPO} \
-	$(KO) build . --bare --tags=$(VERSION) --local=$(KO_LOCAL) --push=$(KO_PUSH)
+	$(KO) build . --bare --sbom=none --tags=$(VERSION) --local=$(KO_LOCAL) --push=$(KO_PUSH)
 
 oci-run: oci-build ## Run OCI container locally (for testing)
 	@docker run --rm -it \

@@ -1,0 +1,26 @@
+name: Container image build
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  ko:
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Login to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: "ko: install"
+        run: make ko
+      - name: "ko: build and push latest tag"
+        run: make VERSION=latest KO_LOCAL=false KO_PUSH=true oci-build
