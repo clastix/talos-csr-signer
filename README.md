@@ -2,9 +2,11 @@
 
 A standalone gRPC service that implements the Talos Security Service protocol, enabling Talos worker nodes to obtain certificates and function with non-Talos control planes.
 
+> Warning: This project is still experimental and in active development. Features and instructions may change.
+
 ## Overview
 
-Talos CSR Signer bridges the gap between traditional Kubernetes control planes (kubeadm, Kamaji, managed Kubernetes) and Talos Linux worker nodes. It provides the certificate signing functionality that Talos workers expect from a native Talos control plane.
+Talos CSR Signer bridges the gap between traditional Kubernetes control planes (kubeadm, Kamaji) and Talos Linux worker nodes. It provides the certificate signing functionality that Talos workers expect from a native Talos control plane.
 
 ### The Problem
 
@@ -23,8 +25,6 @@ Talos workers expect a `trustd` service (part of Talos Linux) to sign Talos API 
 ### The Solution
 
 This service implements the same gRPC protocol as Talos's native `trustd`, acting as a certificate authority for the Talos Machine PKI. It runs as a standard Kubernetes workload alongside your control plane, providing certificate signing services to Talos workers.
-
-**Result:** Talos Linux functionality on worker nodes while maintaining your existing control plane infrastructure.
 
 ## How It Works
 
@@ -63,7 +63,7 @@ When a Talos worker starts, it requests certificates for its API service (apid):
 Talos Worker                 Talos CSR Signer
 |                                 |
 |  1. Generate CSR                |
-|     (subject, IPs, DNS)         |
+|     (subject, IPs)              |
 |                                 |
 |  2. gRPC: Certificate()         |
 |     + metadata: token           |
@@ -83,9 +83,9 @@ Talos Worker                 Talos CSR Signer
 
 ### Discovery and Connection
 
-Workers locate the CSR Signer using the same discovery mechanism as native Talos clusters:
+Workers locate the CSR Signer using the same discovery mechanism as Talos's native `trustd`:
 
-1. **Control Plane Endpoint**: Workers are configured with the control plane IP (e.g., `https://10.10.10.101:6443`)
+1. **Control Plane Endpoint**: Workers are configured with the control plane IP (e.g., `https://10.10.10.100:6443`)
 2. **Port Translation**: Workers contact port 50001 on the same IP for certificate signing
 3. **Automatic Failover**: In HA deployments, LoadBalancer routes requests to healthy CSR Signer pods
 
@@ -98,7 +98,7 @@ The CSR Signer uses the same authentication model as Talos's native `trustd`:
 - **TLS Encryption**: All communication encrypted in transit
 - **CA Private Key**: Stored in Kubernetes Secret, mounted read-only
 
-This is not a limitation but an intentional design inherited from Talos Linux.
+This is an intentional design inherited from Talos Linux.
 
 ## Deployment Models
 
@@ -114,12 +114,37 @@ spec:
     deployment:
       additionalContainers:
         - name: talos-csr-signer
-          image: docker.io/bsctl/talos-csr-signer:latest
+          image: ghcr.io/clastix/talos-csr-signer:latest
           ports:
             - containerPort: 50001
+          env:
+            - name: TALOS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cluster-talos-ca
+                  key: token
+          volumeMounts:
+            - name: talos-ca
+              mountPath: /etc/talos-ca
+              readOnly: true
+            - name: tls-cert
+              mountPath: /etc/talos-server-crt
+              readOnly: true
+      additionalVolumes:
+        - name: talos-ca
+          secret:
+            secretName: cluster-talos-ca
+        - name: tls-cert
+          secret:
+            secretName: cluster-talos-tls-cert
+    service:
+      additionalPorts:
+        - name: talos-csr-signer
+          port: 50001
+          targetPort: 50001
 ```
 
-**Use when:**
+Use when:
 
 - Running Kamaji for multi-tenant Kubernetes
 - Each tenant needs isolated Talos worker support
@@ -141,16 +166,36 @@ spec:
         node-role.kubernetes.io/control-plane: ""
       containers:
       - name: talos-csr-signer
+        image: ghcr.io/clastix/talos-csr-signer:latest
         ports:
         - containerPort: 50001
           hostPort: 50001
+        env:
+        - name: TALOS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: cluster-talos-ca
+              key: token
+        volumeMounts:
+        - name: talos-ca
+          mountPath: /etc/talos-ca
+          readOnly: true
+        - name: tls-cert
+          mountPath: /etc/talos-server-crt
+          readOnly: true
+      volumes:
+      - name: talos-ca
+        secret:
+          secretName: cluster-talos-ca
+      - name: tls-cert
+        secret:
+          secretName: cluster-talos-tls-cert
 ```
 
-**Use when:**
+Use when:
 
 - Existing kubeadm control plane with VIP (keepalived, kube-vip)
 - Want to add Talos workers to existing clusters
-- Incremental migration to Talos
 
 See [docs/standalone-deployment.md](docs/standalone-deployment.md) for complete guide.
 
@@ -160,7 +205,7 @@ See [docs/standalone-deployment.md](docs/standalone-deployment.md) for complete 
 
 **Multi-Tenant Kubernetes:**
 - Kamaji provides virtualized control planes
-- Each tenant gets isolated Talos worker support
+- Each tenant gets isolated Talos workers machines
 - Separate Machine PKI per tenant
 
 **Cost Optimization:**
@@ -169,17 +214,7 @@ See [docs/standalone-deployment.md](docs/standalone-deployment.md) for complete 
 
 ### When NOT to Use CSR Signer
 
-If you're deploying a pure Talos Linux, use the native `trustd` service that comes with Talos.
-
-
-## Key Features
-
-- **Protocol Compatible**: Wire-compatible with Talos `trustd` using SecurityService gRPC spec
-- **Lightweight**: ~20MB distroless container image
-- **High Availability**: Supports multiple replicas behind LoadBalancer
-- **Secure**: Non-root, read-only filesystem, minimal capabilities
-- **Kubernetes Native**: Deploy with kubectl, monitor with standard tools
-- **Simple Operations**: Standard Kubernetes deployment patterns
+If you're deploying a pure Talos Linux, use the native `trustd` service that comes with Talos control planes.
 
 ## Configuration
 
@@ -188,15 +223,22 @@ The service is configured through environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `50001` | gRPC server port |
-| `CA_CERT_PATH` | `/etc/talos-ca/ca.crt` | Talos Machine CA certificate path |
-| `CA_KEY_PATH` | `/etc/talos-ca/ca.key` | Talos Machine CA private key path |
+| `CA_CERT_PATH` | `/etc/talos-ca/tls.crt` | Talos Machine CA certificate path |
+| `CA_KEY_PATH` | `/etc/talos-ca/tls.key` | Talos Machine CA private key path |
+| `TLS_CERT_PATH` | `/etc/talos-server-crt/tls.crt` | CSR gRPC server certificate path |
+| `TLS_KEY_PATH` | `/etc/talos-server-crt/tls.key` | CSR gRPC server private key path |
 | `TALOS_TOKEN` | *(required)* | Machine token for authentication |
 
-CA certificate, private key, and token are mounted from a Kubernetes Secret.
+### Prerequisites
+
+- **cert-manager**: Required to generate TLS certificates for the gRPC server
+- **Talos secrets**: Generated using `talosctl gen secrets`
+
+The Talos Machine CA certificate, private key, and token are stored in a Kubernetes Secret. The gRPC server TLS certificate is generated by cert-manager using the Talos Machine CA as the issuer.
+
+Talos uses ED25519 keys with non-RFC-7468-compliant PEM labels (`BEGIN ED25519 PRIVATE KEY`). The `cert-manager` requires RFC 7468 format (`BEGIN PRIVATE KEY`). The deployment guides include a simple `sed` workaround to fix the PEM label without modifying the actual key bytes.
 
 ## Development
-
-The `Makefile` provides targets for building and testing.
 
 Build and test workflow:
 
@@ -211,9 +253,12 @@ make build
 make test
 make lint
 
-# Build and push Docker image (for custom registries)
+# Build container image with ko (default)
 make docker-build
-make docker-push IMAGE_REGISTRY=your-registry.com IMAGE_REPO=your-repo
+
+# Build container image with Docker
+docker build -t docker.io/bsctl/talos-csr-signer:latest .
+docker push docker.io/bsctl/talos-csr-signer:latest
 ```
 
 Available Makefile targets:
@@ -228,10 +273,9 @@ make build        # Build binary locally
 make test         # Run unit tests
 make lint         # Run golangci-lint
 
-# Docker
-make docker-build # Build Docker image
-make docker-push  # Build and push to registry
-make docker-run   # Run container locally (testing)
+# Container Images
+make oci-build    # Build OCI image with ko
+make oci-run      # Run container locally (testing)
 
 # Utilities
 make clean        # Clean generated files
@@ -254,7 +298,7 @@ Contributions welcome! Please:
 
 ### Apache License 2.0
 
-The majority of this project is licensed under the **Apache License 2.0**. See the [LICENSE](LICENSE) file for full details.
+This project is licensed under the **Apache License 2.0**. See the [LICENSE](LICENSE) file for full details.
 
 ### Protocol Buffer Definition - Mozilla Public License 2.0
 

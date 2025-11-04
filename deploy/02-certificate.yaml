@@ -17,12 +17,7 @@ spec:
     - server auth
   ipAddresses:
     - 127.0.0.1
-    # Add your custom IPs
-  dnsNames:
-    - talos-csr-signer
-    - talos-csr-signer.default
-    - talos-csr-signer.default.svc
-    - talos-csr-signer.default.svc.cluster.local
+    # Add your custom IPs here
   issuerRef:
     name: ${CLUSTER_NAME}-talos-ca  # 01-issuer.yaml
     kind: Issuer
