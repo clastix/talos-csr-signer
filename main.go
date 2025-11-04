@@ -131,8 +131,8 @@ func main() {
 
 	// Flags with their defaults
 	rootCmd.Flags().IntVar(&port, "port", 50001, "Port to listen on")
-	rootCmd.Flags().StringVar(&caCertPath, "ca-cert-path", "/etc/talos-ca/ca.crt", "Path to CA certificate")
-	rootCmd.Flags().StringVar(&caKeyPath, "ca-key-path", "/etc/talos-ca/ca.key", "Path to CA private key")
+	rootCmd.Flags().StringVar(&caCertPath, "ca-cert-path", "/etc/talos-ca/tls.crt", "Path to CA certificate")
+	rootCmd.Flags().StringVar(&caKeyPath, "ca-key-path", "/etc/talos-ca/tls.key", "Path to CA private key")
 	rootCmd.Flags().StringVar(&tlsCertPath, "tls-cert-path", "/etc/talos-server-crt/tls.crt", "Path to the Server TLS certificate")
 	rootCmd.Flags().StringVar(&tlsKeyPath, "tls-key-path", "/etc/talos-server-crt/tls.key", "Path to Server TLS private key")
 	rootCmd.Flags().StringVar(&token, "talos-token", "", "Talos token")

@@ -2,14 +2,14 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: ${CLUSTER_NAME}-talos-tls-cert
-  namespace: default
+  namespace: $NAMESPACE
 spec:
   secretName: ${CLUSTER_NAME}-talos-tls-cert
   duration: 8760h # 1 year
   renewBefore: 720h # 30 days before
   isCA: false
   privateKey:
-    algorithm: ECDSA
+    algorithm: Ed25519
     size: 256
   usages:
     - digital signature
