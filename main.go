@@ -27,29 +27,34 @@ import (
 	"github.com/clastix/talos-csr-signer/pkg/server"
 )
 
+const (
+	cliPortName           = "port"
+	cliCACertificatePath  = "ca-cert-path"
+	cliCAPrivateKeyPath   = "ca-key-path"
+	cliTLSCertificatePath = "tls-cert-path"
+	cliTLSPrivateKeyPath  = "tls-key-path"
+	cliTalosToken         = "talos-token"
+)
+
 func main() {
-	var port int
-
-	var caCertPath, caKeyPath, tlsCertPath, tlsKeyPath, token string
-
 	rootCmd := &cobra.Command{
 		Use:   "talos-csr-signer",
 		Short: "gRPC server for signing Talos CSR",
 		PreRunE: func(*cobra.Command, []string) error {
 			switch {
-			case port <= 0:
+			case viper.GetInt(cliPortName) <= 0:
 				return pkgerrors.ErrMissingPort
-			case port > 65535:
+			case viper.GetInt(cliPortName) > 65535:
 				return pkgerrors.ErrPortOutOfRange
-			case token == "":
+			case viper.GetString(cliTalosToken) == "":
 				return pkgerrors.ErrMissingToken
-			case caCertPath == "":
+			case viper.GetString(cliCACertificatePath) == "":
 				return errors.Wrap(pkgerrors.ErrMissingPath, "CA certificate path is missing")
-			case caKeyPath == "":
+			case viper.GetString(cliCAPrivateKeyPath) == "":
 				return errors.Wrap(pkgerrors.ErrMissingPath, "CA private key path is missing")
-			case tlsCertPath == "":
+			case viper.GetString(cliTLSCertificatePath) == "":
 				return errors.Wrap(pkgerrors.ErrMissingPath, "server certificate path is missing")
-			case tlsKeyPath == "":
+			case viper.GetString(cliTLSPrivateKeyPath) == "":
 				return errors.Wrap(pkgerrors.ErrMissingPath, "server private key path is missing")
 			}
 
@@ -57,12 +62,12 @@ func main() {
 		},
 		RunE: func(*cobra.Command, []string) error {
 			// Load CA certificate
-			caCertPEM, caCertErr := os.ReadFile(caCertPath) //nolint:gosec
+			caCertPEM, caCertErr := os.ReadFile(viper.GetString(cliCACertificatePath))
 			if caCertErr != nil {
 				return errors.Wrap(pkgerrors.ErrReadFile, "failed to read CA certificate: "+caCertErr.Error())
 			}
 			// Load CA private key
-			caKeyPEM, caKeyErr := os.ReadFile(caKeyPath) //nolint:gosec
+			caKeyPEM, caKeyErr := os.ReadFile(viper.GetString(cliCAPrivateKeyPath))
 			if caKeyErr != nil {
 				return errors.Wrap(pkgerrors.ErrReadFile, "failed to read CA private key: "+caKeyErr.Error())
 			}
@@ -92,25 +97,24 @@ func main() {
 				return errors.Wrap(pkgerrors.ErrParseCertificate, privateKeyErr.Error())
 			}
 
-			cert, crtErr := tls.LoadX509KeyPair(tlsCertPath, tlsKeyPath)
+			cert, crtErr := tls.LoadX509KeyPair(viper.GetString(cliTLSCertificatePath), viper.GetString(cliTLSPrivateKeyPath))
 			if crtErr != nil {
 				return errors.Wrap(pkgerrors.ErrLoadingCertificate, crtErr.Error())
 			}
-
 			// Create TLS credentials
 			tlsConfig := &tls.Config{ //nolint:gosec
 				Certificates: []tls.Certificate{cert},
 				ClientAuth:   tls.NoClientCert, // Don't require client certificates
 			}
 			creds := credentials.NewTLS(tlsConfig)
-
 			// Create gRPC Server with TLS
 			srv := &server.Server{
 				CACert:       caCertPEM,
 				CAPrivateKey: caPrivateKey,
-				ValidToken:   token,
+				ValidToken:   viper.GetString(cliTalosToken),
 			}
 
+			port := viper.GetInt(cliPortName)
 			lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 			if err != nil {
 				return errors.Wrap(pkgerrors.ErrServerListen, fmt.Sprintf("%d: %s", port, err.Error()))
@@ -130,29 +134,29 @@ func main() {
 	}
 
 	// Flags with their defaults
-	rootCmd.Flags().IntVar(&port, "port", 50001, "Port to listen on")
-	rootCmd.Flags().StringVar(&caCertPath, "ca-cert-path", "/etc/talos-ca/tls.crt", "Path to CA certificate")
-	rootCmd.Flags().StringVar(&caKeyPath, "ca-key-path", "/etc/talos-ca/tls.key", "Path to CA private key")
-	rootCmd.Flags().StringVar(&tlsCertPath, "tls-cert-path", "/etc/talos-server-crt/tls.crt", "Path to the Server TLS certificate")
-	rootCmd.Flags().StringVar(&tlsKeyPath, "tls-key-path", "/etc/talos-server-crt/tls.key", "Path to Server TLS private key")
-	rootCmd.Flags().StringVar(&token, "talos-token", "", "Talos token")
+	rootCmd.Flags().Int(cliPortName, 50001, "Port to listen on")
+	rootCmd.Flags().String(cliCACertificatePath, "/etc/talos-ca/tls.crt", "Path to CA certificate")
+	rootCmd.Flags().String(cliCAPrivateKeyPath, "/etc/talos-ca/tls.key", "Path to CA private key")
+	rootCmd.Flags().String(cliTLSCertificatePath, "/etc/talos-server-crt/tls.crt", "Path to the Server TLS certificate")
+	rootCmd.Flags().String(cliTLSPrivateKeyPath, "/etc/talos-server-crt/tls.key", "Path to Server TLS private key")
+	rootCmd.Flags().String(cliTalosToken, "", "Talos token")
 	// Bind flags to viper keys
-	_ = viper.BindPFlag("port", rootCmd.Flags().Lookup("port"))
-	_ = viper.BindPFlag("ca_cert_path", rootCmd.Flags().Lookup("ca-cert-path"))
-	_ = viper.BindPFlag("ca_key_path", rootCmd.Flags().Lookup("ca-key-path"))
-	_ = viper.BindPFlag("tls_cert_path", rootCmd.Flags().Lookup("tls-cert-path"))
-	_ = viper.BindPFlag("tls_key_path", rootCmd.Flags().Lookup("tls-key-path"))
-	_ = viper.BindPFlag("talos_token", rootCmd.Flags().Lookup("talos-token"))
+	_ = viper.BindPFlag(cliPortName, rootCmd.Flags().Lookup(cliPortName))
+	_ = viper.BindPFlag(cliCACertificatePath, rootCmd.Flags().Lookup(cliCACertificatePath))
+	_ = viper.BindPFlag(cliCAPrivateKeyPath, rootCmd.Flags().Lookup(cliCAPrivateKeyPath))
+	_ = viper.BindPFlag(cliTLSCertificatePath, rootCmd.Flags().Lookup(cliTLSCertificatePath))
+	_ = viper.BindPFlag(cliTLSPrivateKeyPath, rootCmd.Flags().Lookup(cliTLSPrivateKeyPath))
+	_ = viper.BindPFlag(cliTalosToken, rootCmd.Flags().Lookup(cliTalosToken))
 	// Allow reading from env variables automatically. Env keys are uppercased and `.` replaced with `_`.
 	viper.SetEnvPrefix("")
 	viper.AutomaticEnv()
 	// Explicit env key mapping (to allow different names if desired)
-	_ = viper.BindEnv("port", "PORT")
-	_ = viper.BindEnv("ca_cert_path", "CA_CERT_PATH")
-	_ = viper.BindEnv("ca_key_path", "CA_KEY_PATH")
-	_ = viper.BindEnv("tls_cert_path", "TLS_CERT_PATH")
-	_ = viper.BindEnv("tls_key_path", "TLS_KEY_PATH")
-	_ = viper.BindEnv("talos_token", "TALOS_TOKEN")
+	_ = viper.BindEnv(cliPortName, "PORT")
+	_ = viper.BindEnv(cliCACertificatePath, "CA_CERT_PATH")
+	_ = viper.BindEnv(cliCAPrivateKeyPath, "CA_KEY_PATH")
+	_ = viper.BindEnv(cliTLSCertificatePath, "TLS_CERT_PATH")
+	_ = viper.BindEnv(cliTLSPrivateKeyPath, "TLS_KEY_PATH")
+	_ = viper.BindEnv(cliTalosToken, "TALOS_TOKEN")
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -92,6 +92,12 @@ spec:
             - name: grpc
               containerPort: 50001
               protocol: TCP
+          env:
+            - name: TALOS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ${CLUSTER_NAME}-talos-ca
+                  key: token
           volumeMounts:
             - name: talos-ca
               mountPath: /etc/talos-ca
