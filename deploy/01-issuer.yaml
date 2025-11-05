@@ -5,4 +5,4 @@ metadata:
   namespace: $NAMESPACE
 spec:
   ca:
-    secretName: ${CLUSTER_NAME}-talos-ca  # 00-secret.yaml
+    secretName: ${CLUSTER_NAME}-talos-ca 
