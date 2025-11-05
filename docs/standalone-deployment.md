@@ -277,7 +277,7 @@ nc -zv $CONTROL_PLANE_IP 50001
 Check:
 - Firewall rules on control plane nodes (port 50001)
 - VIP routing (keepalived, kube-vip)
-- SERVER_IPS matches VIP
+- Cert Manager certificate IPs match VIP
 
 ### Worker apid Not Starting
 
@@ -320,7 +320,6 @@ Verify node labels include `node-role.kubernetes.io/control-plane=`
 | `CA_CERT_PATH` | `/etc/talos-ca/ca.crt` | Talos Machine CA certificate path |
 | `CA_KEY_PATH` | `/etc/talos-ca/ca.key` | Talos Machine CA private key path |
 | `TALOS_TOKEN` | required | Machine token for authentication |
-| `SERVER_IPS` | optional | Comma-separated IPs for TLS certificate SANs |
 
 ---
 

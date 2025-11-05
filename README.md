@@ -191,7 +191,6 @@ The service is configured through environment variables:
 | `CA_CERT_PATH` | `/etc/talos-ca/ca.crt` | Talos Machine CA certificate path |
 | `CA_KEY_PATH` | `/etc/talos-ca/ca.key` | Talos Machine CA private key path |
 | `TALOS_TOKEN` | *(required)* | Machine token for authentication |
-| `SERVER_IPS` | *(optional)* | Comma-separated IPs for TLS certificate SANs |
 
 CA certificate, private key, and token are mounted from a Kubernetes Secret.
 
