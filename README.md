@@ -4,6 +4,8 @@ A standalone gRPC service that implements the Talos Security Service protocol, e
 
 > Warning: This project is still experimental and in active development. Features and instructions may change.
 
+_tl;dr;_ ▶️  watch the [live action demo](https://youtu.be/nSGo_72LnmY) of the project.
+
 ## Overview
 
 Talos CSR Signer bridges the gap between traditional Kubernetes control planes (kubeadm, Kamaji) and Talos Linux worker nodes. It provides the certificate signing functionality that Talos workers expect from a native Talos control plane.
